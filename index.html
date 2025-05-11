@@ -1,0 +1,709 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Recibos de Pago</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts (Roboto) -->
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- Font Awesome CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- jsPDF and jsPDF-AutoTable -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
+    <!-- XLSX for export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.4/xlsx.full.min.js"></script>
+    <!-- JsBarcode -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.5/JsBarcode.all.min.js"></script>
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+        }
+        .receipt-container {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 10px;
+            page-break-inside: avoid;
+        }
+        .receipt-half {
+            width: 95%;
+            background-color: white;
+            padding: 15px;
+            margin-bottom: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            position: relative;
+            height: 100mm;
+        }
+        .receipt {
+            font-size: 12px;
+        }
+        .receipt h1 {
+            text-align: center;
+            font-size: 16px;
+            margin: 5px 0;
+            color: #1a202c;
+        }
+        .receipt-institucion {
+            font-size: 18px;
+            font-weight: bold;
+            text-align: center;
+            margin: 8px 0;
+            color: #2d3748;
+        }
+        .receipt img {
+            width: 80px;
+            height: auto;
+            display: block;
+            margin: 0 auto 10px;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+        }
+        .receipt-footer {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(-45deg);
+            font-size: 60px;
+            font-weight: bold;
+            color: rgba(0, 0, 0, 0.2);
+            pointer-events: none;
+            white-space: nowrap;
+        }
+        .spacer {
+            min-height: 45px;
+            margin: 10px 0;
+        }
+        .receipt-table th {
+            font-weight: 500;
+            color: #4a5568;
+            padding: 4px;
+            text-align: left;
+        }
+        .receipt-table td {
+            padding: 4px;
+            color: #2d3748;
+        }
+        .separator {
+            display: flex;
+            align-items: center;
+            width: 95%;
+        }
+        .separator i {
+            margin-right: 5px;
+            color: #4a5568;
+        }
+        .separator hr {
+            border-top: 1px dotted #000;
+            margin: 10px 0;
+            flex-grow: 1;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">Generador de Recibos de Pago</h1>
+
+        <!-- Institución Educativa -->
+        <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">Datos de la Institución Educativa</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label for="institucion" class="block text-sm font-medium text-gray-600">Institución Educativa</label>
+                    <input type="text" id="institucion" class="mt-1 w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500" placeholder="Nombre de la Institución">
+                </div>
+                <div>
+                    <label for="direccion" class="block text-sm font-medium text-gray-600">Dirección</label>
+                    <input type="text" id="direccion" class="mt-1 w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500" placeholder="Dirección de la Institución">
+                </div>
+                <div>
+                    <label for="telefono" class="block text-sm font-medium text-gray-600">Teléfono</label>
+                    <input type="text" id="telefono" class="mt-1 w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500" placeholder="Teléfono de la Institución">
+                </div>
+                <div>
+                    <label for="rut" class="block text-sm font-medium text-gray-600">RUT</label>
+                    <input type="text" id="rut" class="mt-1 w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500" placeholder="RUT de la Institución">
+                </div>
+                <div class="md:col-span-2">
+                    <label for="icono" class="block text-sm font-medium text-gray-600">Icono de la Institución Educativa</label>
+                    <input type="file" id="icono" accept="image/*" class="mt-1 w-full border border-gray-300 rounded-md p-2">
+                </div>
+            </div>
+            <div class="mt-4 flex space-x-2">
+                <button onclick="guardarDatosInstitucion()" class="bg-gradient-to-r from-green-500 to-green-600 text-white px-4 py-2 rounded-md hover:scale-105 transition">Guardar Datos</button>
+                <button onclick="editarDatosIE()" class="bg-gradient-to-r from-yellow-500 to-yellow-600 text-white px-4 py-2 rounded-md hover:scale-105 transition">Editar Datos</button>
+            </div>
+        </div>
+
+        <!-- Datos del Pagador -->
+        <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">Datos del Pagador</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label for="documento" class="block text-sm font-medium text-gray-600">Documento del Pagador</label>
+                    <input type="text" id="documento" class="mt-1 w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500" placeholder="Documento del pagador">
+                </div>
+                <div>
+                    <label for="numero_recibo" class="block text-sm font-medium text-gray-600">Número de Recibo</label>
+                    <input type="text" id="numero_recibo" class="mt-1 w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500" placeholder="Número de recibo">
+                </div>
+                <div>
+                    <label for="nombre" class="block text-sm font-medium text-gray-600">Nombre del Pagador</label>
+                    <input type="text" id="nombre" class="mt-1 w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500" placeholder="Nombre del pagador">
+                </div>
+                <div>
+                    <label for="concepto" class="block text-sm font-medium text-gray-600">Concepto de Pago</label>
+                    <input type="text" id="concepto" class="mt-1 w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500" placeholder="Concepto de pago (ej. Matrícula)">
+                </div>
+                <div>
+                    <label for="valor" class="block text-sm font-medium text-gray-600">Valor $</label>
+                    <input type="text" id="valor" class="mt-1 w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500" placeholder="Valor a pagar">
+                </div>
+                <div>
+                    <label for="fecha" class="block text-sm font-medium text-gray-600">Fecha</label>
+                    <input type="date" id="fecha" class="mt-1 w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500">
+                </div>
+            </div>
+            <div class="mt-4">
+                <button onclick="generarRecibo()" class="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 rounded-md hover:scale-105 transition">Generar Recibo</button>
+            </div>
+        </div>
+
+        <!-- Historial -->
+        <div class="bg-white p-6 rounded-lg shadow-md">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold text-gray-700">Historial de Recibos Generados</h2>
+                <button onclick="exportarExcel()" class="bg-gradient-to-r from-teal-500 to-teal-600 text-white px-4 py-2 rounded-md hover:scale-105 transition">
+                    <i class="fas fa-file-excel mr-2"></i>Exportar a Excel
+                </button>
+            </div>
+            <div id="recibo-container" style="display: none;"></div>
+            <div class="overflow-x-auto">
+                <table class="w-full border-collapse">
+                    <thead>
+                        <tr class="bg-gray-100">
+                            <th class="p-2 text-left text-sm font-medium text-gray-600">Recibo #</th>
+                            <th class="p-2 text-left text-sm font-medium text-gray-600">Pagador</th>
+                            <th class="p-2 text-left text-sm font-medium text-gray-600">Concepto</th>
+                            <th class="p-2 text-left text-sm font-medium text-gray-600">Fecha</th>
+                            <th class="p-2 text-left text-sm font-medium text-gray-600">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-list" class="divide-y divide-gray-200"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let institucion, direccion, telefono, rut, numero_recibo;
+        let iconoUrl;
+        let receipts = [];
+        let editingReceiptId = null;
+
+        // Cargar icono
+        document.getElementById('icono').addEventListener('change', function(event) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                iconoUrl = e.target.result;
+            }
+            reader.readAsDataURL(event.target.files[0]);
+        });
+
+        // Deshabilitar campos IE
+        function deshabilitarCamposIE() {
+            document.getElementById('institucion').disabled = true;
+            document.getElementById('direccion').disabled = true;
+            document.getElementById('telefono').disabled = true;
+            document.getElementById('rut').disabled = true;
+            document.getElementById('icono').disabled = true;
+        }
+
+        // Habilitar campos IE
+        function habilitarCamposIE() {
+            document.getElementById('institucion').disabled = false;
+            document.getElementById('direccion').disabled = false;
+            document.getElementById('telefono').disabled = false;
+            document.getElementById('rut').disabled = false;
+            document.getElementById('icono').disabled = false;
+        }
+
+        // Guardar datos IE
+        function guardarDatosInstitucion() {
+            institucion = document.getElementById('institucion').value;
+            direccion = document.getElementById('direccion').value;
+            telefono = document.getElementById('telefono').value;
+            rut = document.getElementById('rut').value;
+
+            if (institucion && direccion && telefono && rut) {
+                localStorage.setItem('institucion', institucion);
+                localStorage.setItem('direccion', direccion);
+                localStorage.setItem('telefono', telefono);
+                localStorage.setItem('rut', rut);
+                deshabilitarCamposIE();
+                alert('Datos de la Institución guardados exitosamente.');
+            } else {
+                alert('Por favor, complete todos los campos.');
+            }
+        }
+
+        // Cargar datos IE
+        function cargarDatosInstitucion() {
+            institucion = localStorage.getItem('institucion');
+            direccion = localStorage.getItem('direccion');
+            telefono = localStorage.getItem('telefono');
+            rut = localStorage.getItem('rut');
+
+            if (institucion && direccion && telefono && rut) {
+                document.getElementById('institucion').value = institucion;
+                document.getElementById('direccion').value = direccion;
+                document.getElementById('telefono').value = telefono;
+                document.getElementById('rut').value = rut;
+                deshabilitarCamposIE();
+            }
+        }
+
+        // Editar datos IE
+        function editarDatosIE() {
+            if (confirm("¿Estás seguro de que deseas editar los datos de la Institución?")) {
+                habilitarCamposIE();
+                document.getElementById('institucion').focus();
+                alert('Los campos de la Institución ahora son editables. Guarda los cambios cuando termines.');
+            }
+        }
+
+        // Generar HTML del recibo
+        function generarReciboHTML(data) {
+            return `
+                <div class="receipt-container">
+                    <div class="receipt-half">
+                        <div class="receipt">
+                            <h1>RECIBO DE PAGO</h1>
+                            ${iconoUrl ? `<img src="${iconoUrl}" alt="Icono IE">` : ''}
+                            <h2 class="receipt-institucion">${data.institucion}</h2>
+                            <table class="receipt-table w-full text-left text-sm">
+                                <tr><th>Dirección:</th><td>${data.direccion}</td></tr>
+                                <tr><th>Teléfono:</th><td>${data.telefono}</td></tr>
+                                <tr><th>RUT:</th><td>${data.rut}</td></tr>
+                                <tr><th>Número de Recibo:</th><td>${data.numero_recibo}</td></tr>
+                                <tr><th>Nombre del Pagador:</th><td>${data.nombre}</td></tr>
+                                <tr><th>Concepto de Pago:</th><td>${data.concepto}</td></tr>
+                                <tr><th>Valor:</th><td>$${data.valor}</td></tr>
+                                <tr><th>Fecha:</th><td>${formatearFecha(data.fecha)}</td></tr>
+                                <tr><th>Documento del Pagador:</th><td>${data.documento}</td></tr>
+                            </table>
+                            <div class="spacer"></div>
+                            <div class="receipt-footer">ORIGINAL</div>
+                        </div>
+                    </div>
+                    <div class="separator">
+                        <i class="fas fa-scissors"></i>
+                        <hr>
+                    </div>
+                    <div class="receipt-half">
+                        <div class="receipt">
+                            <h1>RECIBO DE PAGO</h1>
+                            ${iconoUrl ? `<img src="${iconoUrl}" alt="Icono IE">` : ''}
+                            <h2 class="receipt-institucion">${data.institucion}</h2>
+                            <table class="receipt-table w-full text-left text-sm">
+                                <tr><th>Dirección:</th><td>${data.direccion}</td></tr>
+                                <tr><th>Teléfono:</th><td>${data.telefono}</td></tr>
+                                <tr><th>RUT:</th><td>${data.rut}</td></tr>
+                                <tr><th>Número de Recibo:</th><td>${data.numero_recibo}</td></tr>
+                                <tr><th>Nombre del Pagador:</th><td>${data.nombre}</td></tr>
+                                <tr><th>Concepto de Pago:</th><td>${data.concepto}</td></tr>
+                                <tr><th>Valor:</th><td>$${data.valor}</td></tr>
+                                <tr><th>Fecha:</th><td>${formatearFecha(data.fecha)}</td></tr>
+                                <tr><th>Documento del Pagador:</th><td>${data.documento}</td></tr>
+                            </table>
+                            <div class="spacer"></div>
+                            <div class="receipt-footer">COPIA</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Generar ID único
+        function generarIdUnico() {
+            return 'xxxx-xxxx-xxxx-xxxx'.replace(/[x]/g, () => {
+                return Math.floor(Math.random() * 16).toString(16);
+            });
+        }
+
+        // Actualizar historial
+        function actualizarHistorial() {
+            const historyList = document.getElementById('history-list');
+            historyList.innerHTML = '';
+            receipts.forEach(receipt => {
+                const displayNumeroRecibo = receipt.numero_recibo || 'Sin número';
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-50';
+                row.innerHTML = `
+                    <td class="p-2 text-sm text-gray-700">${displayNumeroRecibo}</td>
+                    <td class="p-2 text-sm text-gray-700">${receipt.nombre}</td>
+                    <td class="p-2 text-sm text-gray-700">${receipt.concepto}</td>
+                    <td class="p-2 text-sm text-gray-700">${formatearFecha(receipt.fecha)}</td>
+                    <td class="p-2 text-sm">
+                        <button class="text-blue-600 hover:text-blue-800 mr-2" onclick="descargarPDF('${receipt.id}')"><i class="fas fa-file-pdf"></i></button>
+                        <button class="text-green-600 hover:text-green-800 mr-2" onclick="imprimirRecibo('${receipt.id}')"><i class="fas fa-print"></i></button>
+                        <button class="text-yellow-600 hover:text-yellow-800 mr-2" onclick="editarRecibo('${receipt.id}')"><i class="fas fa-edit"></i></button>
+                        <button class="text-red-600 hover:text-red-800" onclick="eliminarRecibo('${receipt.id}')"><i class="fas fa-trash"></i></button>
+                    </td>
+                `;
+                historyList.appendChild(row);
+            });
+        }
+
+        // Sanitizar valor
+        function sanitizarValor(valor) {
+            if (!valor || (typeof valor !== 'string' && typeof valor !== 'number')) {
+                console.warn('Valor inválido, usando valor por defecto:', valor);
+                return '0';
+            }
+            const sanitized = String(valor).trim().replace(/[^0-9]/g, '').substring(0, 50);
+            return sanitized || '0';
+        }
+
+        // Formatear fecha
+        function formatearFecha(fecha) {
+            const partes = fecha.split('-');
+            return `${partes[2]}/${partes[1]}/${partes[0]}`;
+        }
+
+        // Generar recibo
+        function generarRecibo() {
+            const receiptData = {
+                id: editingReceiptId || generarIdUnico(),
+                institucion: document.getElementById('institucion').value,
+                direccion: document.getElementById('direccion').value,
+                telefono: document.getElementById('telefono').value,
+                rut: document.getElementById('rut').value,
+                numero_recibo: document.getElementById('numero_recibo').value.trim(),
+                nombre: document.getElementById('nombre').value,
+                concepto: document.getElementById('concepto').value,
+                valor: sanitizarValor(document.getElementById('valor').value),
+                fecha: document.getElementById('fecha').value,
+                documento: document.getElementById('documento').value
+            };
+
+            if (receiptData.institucion && receiptData.nombre && receiptData.concepto && receiptData.valor && receiptData.fecha && receiptData.direccion && receiptData.telefono && receiptData.rut && receiptData.numero_recibo) {
+                if (editingReceiptId) {
+                    const index = receipts.findIndex(r => r.id === editingReceiptId);
+                    receipts[index] = receiptData;
+                    editingReceiptId = null;
+                    alert('Recibo actualizado exitosamente.');
+                } else {
+                    receipts.push(receiptData);
+                    alert('Recibo generado exitosamente. Use los botones en el historial para visualizarlo o gestionarlo.');
+                }
+
+                actualizarHistorial();
+
+                document.getElementById('numero_recibo').value = '';
+                document.getElementById('documento').value = '';
+                document.getElementById('nombre').value = '';
+                document.getElementById('concepto').value = '';
+                document.getElementById('valor').value = '';
+                document.getElementById('fecha').value = '';
+            } else {
+                alert('Por favor, complete todos los campos con datos válidos.');
+            }
+        }
+
+        // Exportar a Excel
+        function exportarExcel() {
+            if (receipts.length === 0) {
+                alert('No hay recibos para exportar.');
+                return;
+            }
+
+            const wb = XLSX.utils.book_new();
+            const wsData = [
+                ['Institución', 'Nombre del Pagador', 'Concepto', 'Valor', 'Fecha', 'Documento', 'Número de Recibo']
+            ];
+            receipts.forEach(receipt => {
+                wsData.push([
+                    receipt.institucion,
+                    receipt.nombre,
+                    receipt.concepto,
+                    receipt.valor,
+                    formatearFecha(receipt.fecha),
+                    receipt.documento,
+                    receipt.numero_recibo
+                ]);
+            });
+            const ws = XLSX.utils.aoa_to_sheet(wsData);
+            XLSX.utils.book_append_sheet(wb, ws, 'Recibos');
+            XLSX.writeFile(wb, 'recibos_pago.xlsx');
+        }
+
+        // Descargar PDF
+        async function descargarPDF(receiptId) {
+            const receipt = receipts.find(r => r.id === receiptId);
+            if (!receipt) {
+                alert('Recibo no encontrado.');
+                return;
+            }
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({
+                orientation: 'portrait',
+                unit: 'mm',
+                format: 'letter'
+            });
+
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const margin = 10;
+            const contentWidth = pageWidth - 2 * margin;
+
+            // Hora actual
+            const now = new Date();
+            const hora = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+            console.log(`Hora de impresión para PDF: ${hora}`);
+
+            // Generar Barcode (Valor)
+            let barcodeDataUrl;
+            try {
+                const canvas = document.createElement('canvas');
+                JsBarcode(canvas, receipt.valor, {
+                    format: 'CODE128',
+                    width: 2,
+                    height: 40,
+                    displayValue: false
+                });
+                barcodeDataUrl = canvas.toDataURL('image/png');
+            } catch (err) {
+                console.error('Error generando Barcode:', err);
+                barcodeDataUrl = '';
+            }
+
+            // Original (Arriba, 10mm–110mm)
+            doc.setFillColor(255, 255, 255);
+            doc.rect(margin, margin, contentWidth, 100, 'F');
+            if (iconoUrl) {
+                doc.addImage(iconoUrl, 'JPEG', margin + (contentWidth - 20) / 2, margin + 1, 20, 20);
+            }
+            doc.setFontSize(16);
+            doc.setTextColor(26, 32, 44);
+            doc.text('RECIBO DE PAGO', margin + contentWidth / 2, margin + 22, { align: 'center' });
+            doc.setFontSize(18);
+            doc.text(receipt.institucion, margin + contentWidth / 2, margin + 26, { align: 'center' });
+            doc.autoTable({
+                startY: margin + 30,
+                body: [
+                    ['Dirección:', receipt.direccion],
+                    ['Teléfono:', receipt.telefono],
+                    ['RUT:', receipt.rut],
+                    ['Número de Recibo:', receipt.numero_recibo],
+                    ['Nombre del Pagador:', receipt.nombre],
+                    ['Concepto de Pago:', receipt.concepto],
+                    ['Valor:', `$${receipt.valor}`],
+                    ['Fecha:', formatearFecha(receipt.fecha)],
+                    ['Hora de Impresión:', hora],
+                    ['Documento del Pagador:', receipt.documento]
+                ],
+                styles: { fontSize: 11, cellPadding: 0.5, textColor: [26, 32, 44] },
+                columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } }
+            });
+            let tableEndY = doc.lastAutoTable.finalY;
+            console.log(`Original table end Y: ${tableEndY}`);
+
+            // Barcode en Original
+            if (barcodeDataUrl) {
+                doc.addImage(barcodeDataUrl, 'PNG', margin + contentWidth - 40, tableEndY + 5, 40, 10);
+            }
+
+            // Dotted Line with Scissor Icon (y=138.5mm)
+            console.log('Drawing dotted line at y=138.5mm with scissor icon');
+            doc.setFontSize(12);
+            doc.setTextColor(0, 0, 0);
+            doc.text('✂', margin, 138.5);
+            doc.setLineWidth(0.2);
+            doc.setDrawColor(0);
+            doc.setLineDash([2, 2]);
+            doc.line(margin + 5, 138.5, margin + contentWidth, 138.5);
+            doc.setLineDash([]);
+
+            // Copia (Abajo, 148.5mm–248.5mm)
+            doc.setFillColor(255, 255, 255);
+            doc.rect(margin, margin + 138.5, contentWidth, 100, 'F');
+            if (iconoUrl) {
+                doc.addImage(iconoUrl, 'JPEG', margin + (contentWidth - 20) / 2, margin + 139.5, 20, 20);
+            }
+            doc.setFontSize(16);
+            doc.text('RECIBO DE PAGO', margin + contentWidth / 2, margin + 160.5, { align: 'center' });
+            doc.setFontSize(18);
+            doc.text(receipt.institucion, margin + contentWidth / 2, margin + 164.5, { align: 'center' });
+            doc.autoTable({
+                startY: margin + 168.5,
+                body: [
+                    ['Dirección:', receipt.direccion],
+                    ['Teléfono:', receipt.telefono],
+                    ['RUT:', receipt.rut],
+                    ['Número de Recibo:', receipt.numero_recibo],
+                    ['Nombre del Pagador:', receipt.nombre],
+                    ['Concepto de Pago:', receipt.concepto],
+                    ['Valor:', `$${receipt.valor}`],
+                    ['Fecha:', formatearFecha(receipt.fecha)],
+                    ['Hora de Impresión:', hora],
+                    ['Documento del Pagador:', receipt.documento]
+                ],
+                styles: { fontSize: 11, cellPadding: 0.5, textColor: [26, 32, 44] },
+                columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } }
+            });
+            tableEndY = doc.lastAutoTable.finalY;
+            console.log(`Copia table end Y: ${tableEndY}`);
+
+            // Barcode en Copia
+            if (barcodeDataUrl) {
+                doc.addImage(barcodeDataUrl, 'PNG', margin + contentWidth - 40, tableEndY + 5, 40, 10);
+            }
+
+            // Watermarks
+            doc.setFontSize(60);
+            doc.setTextColor(0, 0, 0, 0.2);
+            doc.text('ORIGINAL', pageWidth / 2, margin + 50, { align: 'center', angle: -45 });
+            doc.text('COPIA', pageWidth / 2, margin + 198.5, { align: 'center', angle: -45 });
+
+            doc.save(`recibo_pago_${receipt.numero_recibo}.pdf`);
+        }
+
+        // Imprimir recibo
+        async function imprimirRecibo(receiptId) {
+            const receipt = receipts.find(r => r.id === receiptId);
+            if (!receipt) {
+                alert('Recibo no encontrado.');
+                return;
+            }
+
+            console.log('Imprimiendo recibo:', receipt);
+            const reciboHTML = generarReciboHTML(receipt);
+            const reciboContainer = document.getElementById('recibo-container');
+            reciboContainer.style.display = 'block';
+            reciboContainer.innerHTML = reciboHTML;
+
+            setTimeout(() => {
+                const ventanaImpresion = window.open('', '_blank');
+                if (!ventanaImpresion) {
+                    alert('No se pudo abrir la ventana de impresión. Verifica que los pop-ups estén habilitados.');
+                    reciboContainer.innerHTML = '';
+                    reciboContainer.style.display = 'none';
+                    return;
+                }
+
+                ventanaImpresion.document.write('<html><head><title>Recibo de Pago</title>');
+                ventanaImpresion.document.write(`
+                    <style>
+                        @page { size: letter; margin: 1cm; }
+                        .receipt-container { display: flex; flex-direction: column; align-items: center; width: 100%; }
+                        .receipt-half { width: 95%; background-color: white; padding: 15px; margin-bottom: 10px; position: relative; height: 100mm; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
+                        .receipt { font-size: 12px; }
+                        .receipt h1 { text-align: center; font-size: 16px; margin: 5px 0; color: #1a202c; }
+                        .receipt-institucion { font-size: 18px; font-weight: bold; text-align: center; margin: 8px 0; color: #2d3748; }
+                        .receipt img { width: 80px; height: auto; display: block; margin: 0 auto 10px; border: 1px solid #e2e8f0; border-radius: 4px; }
+                        .receipt-footer { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 60px; font-weight: bold; color: rgba(0, 0, 0, 0.2); pointer-events: none; white-space: nowrap; }
+                        .spacer { min-height: 45px; margin: 10px 0; }
+                        .receipt-table th { font-weight: 500; color: #4a5568; padding: 4px; text-align: left; }
+                        .receipt-table td { padding: 4px; color: #2d3748; }
+                        .separator { display: flex; align-items: center; width: 95%; }
+                        .separator i { margin-right: 5px; color: #4a5568; }
+                        .separator hr { border-top: 1px dotted #000; margin: 10px 0; flex-grow: 1; }
+                    </style>
+                `);
+                ventanaImpresion.document.write('</head><body>');
+                ventanaImpresion.document.write(reciboHTML);
+                ventanaImpresion.document.write('</body></html>');
+                ventanaImpresion.document.close();
+
+                setTimeout(() => {
+                    try {
+                        ventanaImpresion.focus();
+                        ventanaImpresion.print();
+                        ventanaImpresion.close();
+                    } catch (error) {
+                        alert('Error al intentar imprimir. Por favor, intenta de nuevo o verifica la configuración de tu navegador.');
+                        console.error('Error de impresión:', error);
+                        ventanaImpresion.close();
+                    }
+                    reciboContainer.innerHTML = '';
+                    reciboContainer.style.display = 'none';
+                }, 500);
+            }, 2000);
+        }
+
+        // Editar recibo
+        function editarRecibo(receiptId) {
+            const receipt = receipts.find(r => r.id === receiptId);
+            if (!receipt) {
+                alert('Recibo no encontrado.');
+                return;
+            }
+            if (confirm("¿Estás seguro de que deseas editar este recibo?")) {
+                editingReceiptId = receiptId;
+                document.getElementById('numero_recibo').value = receipt.numero_recibo;
+                document.getElementById('documento').value = receipt.documento;
+                document.getElementById('nombre').value = receipt.nombre;
+                document.getElementById('concepto').value = receipt.concepto;
+                document.getElementById('valor').value = receipt.valor;
+                document.getElementById('fecha').value = receipt.fecha;
+                document.getElementById('numero_recibo').focus();
+            }
+        }
+
+        // Eliminar recibo
+        function eliminarRecibo(receiptId) {
+            if (confirm("¿Estás seguro de que deseas eliminar este recibo? Esta acción no se puede deshacer.")) {
+                receipts = receipts.filter(r => r.id !== receiptId);
+                actualizarHistorial();
+                alert('Recibo eliminado exitosamente.');
+            }
+        }
+
+        // Cargar datos al iniciar
+        window.onload = cargarDatosInstitucion;
+    </script>
+</body>
+</html>
